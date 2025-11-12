@@ -19,10 +19,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { circle } from '@turf/turf';
 import { ChevronDown, ChevronUp, Circle } from 'lucide-react';
-import showerIconPath from '../assets/shower.svg';
-import fountainIconPath from '../assets/fountain.svg';
-import attractionIconPath from '../assets/attraction.svg';
-import dumpPointIconPath from '../assets/dump.svg';
 
 interface GeoJSONFeature {
   type: 'Feature';
@@ -80,18 +76,28 @@ function Legend() {
       <h3 className="font-bold mb-2">Click points to get details</h3>
       
       <div className="flex items-center mb-1">
-        <img src={fountainIconPath} alt="Drinking Fountain" className="w-4 h-4 mr-2" />
+        <span className="text-lg mr-2">💧</span>
         <span>Drinking Fountain</span>
       </div>
       
       <div className="flex items-center mb-1">
-        <img src={dumpPointIconPath} alt="Dump Point" className="w-4 h-4 mr-2" />
+        <span className="text-lg mr-2">🗑️</span>
         <span>Dump Point</span>
       </div>
       
       <div className="flex items-center mb-1">
-        <img src={showerIconPath} alt="Shower" className="w-4 h-4 mr-2" />
+        <span className="text-lg mr-2">🚿</span>
         <span>Shower</span>
+      </div>
+      
+      <div className="flex items-center mb-1">
+        <span className="text-lg mr-2">🚽</span>
+        <span>Toilet</span>
+      </div>
+      
+      <div className="flex items-center mb-1">
+        <span className="text-lg mr-2">🏞️</span>
+        <span>Attraction</span>
       </div>
     </div>
   );
@@ -330,10 +336,20 @@ export default function WaterMap() {
       mapRef.current!.on('click', 'clusters', (e) => {
         const features = mapRef.current?.queryRenderedFeatures(e.point, { layers: ['clusters'] }) ?? [];
         const clusterId = features[0]?.properties?.cluster_id;
+        const pointCount = features[0]?.properties?.point_count;
+        
+        // Debug: log cluster information
+        if (pointCount) {
+          console.log(`Cluster clicked: ID=${clusterId}, Point count=${pointCount}`);
+        }
+        
         (mapRef.current?.getSource('places') as mapboxgl.GeoJSONSource)?.getClusterExpansionZoom(
           clusterId,
           (err, zoom) => {
-            if (err) return;
+            if (err) {
+              console.error('Error getting cluster expansion zoom:', err);
+              return;
+            }
 
             mapRef.current!.easeTo({
               center: (features[0].geometry as GeoJSON.Point).coordinates as [number, number],
@@ -367,75 +383,168 @@ export default function WaterMap() {
   }, [updateStartPoint]);
 
   useEffect(() => {
-    const addFountainsLayer = (map: mapboxgl.Map, data: GeoJSONData) => {
+    const addFountainsLayer = async (map: mapboxgl.Map, data: GeoJSONData) => {
       const filteredData = {
         ...data,
         features: data.features.filter(feature => {
-            // If no type is selected, show all features
-            if (selectedType === null) {
-              return true;
+          const featureType = feature.properties.type;
+          
+          // First, filter by selected type
+          if (selectedType !== null) {
+            if (selectedType === 'fountain' && featureType !== 'Fountain') {
+              return false;
             }
-
-           // First, filter by selected type
-          if (selectedType === 'fountain' && feature.properties.type !== 'Fountain') {
-            return false;
-          }
-          if (selectedType === 'toilet' && feature.properties.type == 'Fountain') {
-            return false;
+            if (selectedType === 'toilet' && (featureType === 'Fountain' || featureType === 'Attraction')) {
+              return false;
+            }
           }
           
-          if (feature.properties.type === 'Fountain') {
-            return (!filterDogBowl || feature.properties.dog_bowl) &&
-                   (!filterBottleTap || feature.properties.bottle_refill_tap);
+          // Then apply type-specific filters
+          if (featureType === 'Fountain') {
+            // For fountains, apply fountain-specific filters
+            const passesDogBowlFilter = !filterDogBowl || feature.properties.dog_bowl === true;
+            const passesBottleTapFilter = !filterBottleTap || feature.properties.bottle_refill_tap === true;
+            return passesDogBowlFilter && passesBottleTapFilter;
+          } else if (featureType === 'Attraction') {
+            // Attractions are always shown (no filters applied)
+            return true;
           } else {
-            return (!filterDP || feature.properties.dump_point) &&
-                   (!filterShower || feature.properties.shower) &&
-                   (!filterParking || feature.properties.parking) &&
-                   (!filterAccessible || feature.properties.accessible) &&
-                   (!filterMale || feature.properties.male) &&
-                   (!filterFemale || feature.properties.female) &&
-                   (!filterAC || feature.properties.adult_change) &&
-                   (!filterBC || feature.properties.baby_care_room);
+            // For toilets and other types, apply toilet-specific filters
+            const passesDPFilter = !filterDP || feature.properties.dump_point === true;
+            const passesShowerFilter = !filterShower || feature.properties.shower === true;
+            const passesParkingFilter = !filterParking || feature.properties.parking === true;
+            const passesAccessibleFilter = !filterAccessible || feature.properties.accessible === true;
+            const passesMaleFilter = !filterMale || feature.properties.male === true;
+            const passesFemaleFilter = !filterFemale || feature.properties.female === true;
+            const passesACFilter = !filterAC || feature.properties.adult_change === true;
+            const passesBCFilter = !filterBC || feature.properties.baby_care_room === true;
+            
+            return passesDPFilter && passesShowerFilter && passesParkingFilter && 
+                   passesAccessibleFilter && passesMaleFilter && passesFemaleFilter && 
+                   passesACFilter && passesBCFilter;
           }
-          return true;
         })
       };
 
-        // load icon
-        const showerImg = new Image(20, 20);
-        showerImg.onload = () => {
-          map.addImage('shower-icon', showerImg);
-        };
-        showerImg.src = showerIconPath;
-  
-        const fountainImg = new Image(20, 20);
-        fountainImg.onload = () => {
-          map.addImage('fountain-icon', fountainImg);
-        };
-        fountainImg.src = fountainIconPath;
-  
-        const attractionImg = new Image(20, 20);
-        attractionImg.onload = () => {
-          map.addImage('attraction-icon', attractionImg);
-        };
-        attractionImg.src = attractionIconPath;
-  
-        const dumpPointImg = new Image(20, 20);
-        dumpPointImg.onload = () => {
-          map.addImage('dump-point-icon', dumpPointImg);
-        };
-        dumpPointImg.src = dumpPointIconPath;
-  
-  
+      // No need to load icons - we'll use emoji text instead
+
+      // Log filtered data for debugging
+      const typeCounts = filteredData.features.reduce((acc, f) => {
+        const type = f.properties.type || 'Unknown';
+        acc[type] = (acc[type] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      
+      console.log(`Filtered data: ${filteredData.features.length} features out of ${data.features.length} total`);
+      console.log('Type distribution:', typeCounts);
+
       if (filteredData.features.length === 0) {
         setIsNoDataDialogOpen(true);
       } else {
         setIsNoDataDialogOpen(false);
       }
 
+      // Convert emoji to image and load into Mapbox
+      const emojiToImage = (emoji: string, name: string): Promise<void> => {
+        return new Promise((resolve, reject) => {
+          // Check if image already exists
+          if (map.hasImage(name)) {
+            resolve();
+            return;
+          }
+
+          const canvas = document.createElement('canvas');
+          const size = 40; // Icon size
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          
+          if (!ctx) {
+            reject(new Error('Could not get canvas context'));
+            return;
+          }
+
+          // Set font size for emoji
+          ctx.font = `${size * 0.8}px Arial`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          
+          // Draw emoji on canvas
+          ctx.fillText(emoji, size / 2, size / 2);
+          
+          // Convert canvas to image
+          canvas.toBlob((blob) => {
+            if (!blob) {
+              reject(new Error('Failed to create blob'));
+              return;
+            }
+            
+            const img = new Image();
+            img.onload = () => {
+              try {
+                map.addImage(name, img);
+                resolve();
+              } catch (error) {
+                console.warn(`Failed to add icon ${name}:`, error);
+                resolve(); // Continue even if one icon fails
+              }
+            };
+            img.onerror = () => {
+              console.error(`Failed to load icon ${name}`);
+              reject(new Error(`Failed to load icon ${name}`));
+            };
+            img.src = URL.createObjectURL(blob);
+          }, 'image/png');
+        });
+      };
+
+      // Load all emoji icons
+      const loadEmojiIcons = async () => {
+        try {
+          await Promise.all([
+            emojiToImage('💧', 'fountain-icon'),
+            emojiToImage('🚿', 'shower-icon'),
+            emojiToImage('🗑️', 'dump-point-icon'),
+            emojiToImage('🏞️', 'attraction-icon'), // Changed to mountain/lake emoji
+            emojiToImage('🚽', 'toilet-icon'),
+          ]);
+          console.log('All emoji icons loaded successfully');
+        } catch (error) {
+          console.error('Error loading emoji icons:', error);
+        }
+      };
+
+      // Load icons before adding layers
+      loadEmojiIcons().then(() => {
+        // Update or add source after icons are loaded
       if (map.getSource('places')) {
+        // Source exists, just update the data
+        // This will trigger Mapbox to recalculate clusters automatically
         (map.getSource('places') as mapboxgl.GeoJSONSource).setData(filteredData);
+        
+        // Ensure unclustered-point layer exists and uses emoji icons
+        if (!map.getLayer('unclustered-point')) {
+          map.addLayer({
+            id: 'unclustered-point',
+            type: 'symbol',
+            source: 'places',
+            filter: ['!', ['has', 'point_count']],
+            layout: {
+              'icon-image': [
+                'case',
+                ['==', ['get', 'type'], 'Fountain'], 'fountain-icon',
+                ['==', ['get', 'type'], 'Attraction'], 'attraction-icon',
+                ['==', ['get', 'sub_type'], 'Shower'], 'shower-icon',
+                ['==', ['get', 'sub_type'], 'Dump Point'], 'dump-point-icon',
+                'toilet-icon' // Default for toilets and other cases
+              ],
+              'icon-size': 0.5, // Smaller size to match Travel.tsx
+              'icon-allow-overlap': false,
+            },
+          });
+        }
       } else {
+        // Source doesn't exist, create it and add layers
         map.addSource('places', {
           type: 'geojson',
           data: filteredData,
@@ -444,75 +553,80 @@ export default function WaterMap() {
           clusterRadius: 50,  // Radius of each cluster when clustering points
         });
   
-        map.addLayer({
-          id: 'clusters',
-          type: 'circle',
-          source: 'places',
-          filter: ['has', 'point_count'],
-          paint: {
-            'circle-color': [
-              'step',
-              ['get', 'point_count'],
-              '#f1f075',
-              10,
-              '#ed9e28',
-              50,
-              '#f28cb1',
-            ],
-            'circle-radius': [
-              'step',
-              ['get', 'point_count'],
-              20,
-              10,
-              30,
-              50,
-              40,
-            ],
-          },
-        });
+        // Add cluster layer
+        if (!map.getLayer('clusters')) {
+          map.addLayer({
+            id: 'clusters',
+            type: 'circle',
+            source: 'places',
+            filter: ['has', 'point_count'],
+            paint: {
+              'circle-color': [
+                'step',
+                ['get', 'point_count'],
+                '#f1f075',
+                10,
+                '#ed9e28',
+                50,
+                '#f28cb1',
+              ],
+              'circle-radius': [
+                'step',
+                ['get', 'point_count'],
+                20,
+                10,
+                30,
+                50,
+                40,
+              ],
+            },
+          });
+        }
   
-        map.addLayer({
-          id: 'cluster-count',
-          type: 'symbol',
-          source: 'places',
-          filter: ['has', 'point_count'],
-          layout: {
-            'text-field': '{point_count_abbreviated}',
-            'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
-            'text-size': 12,
-          },
-        });
+        // Add cluster count layer
+        if (!map.getLayer('cluster-count')) {
+          map.addLayer({
+            id: 'cluster-count',
+            type: 'symbol',
+            source: 'places',
+            filter: ['has', 'point_count'],
+            layout: {
+              'text-field': '{point_count_abbreviated}',
+              'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+              'text-size': 12,
+            },
+          });
+        }
   
-      // icon
-      map.addLayer({
-        id: 'unclustered-point',
-        type: 'symbol',
-        source: 'places',
-        filter: ['!', ['has', 'point_count']],
-        layout: {
-          'icon-image': [
-            'case',
-
-            ['==', ['get', 'type'], 'Fountain'], 'fountain-icon',
-
-            ['==', ['get', 'type'], 'Attraction'], 'attraction-icon',
-
-            ['==', ['get', 'sub_type'], 'Shower'], 'shower-icon',
-
-            ['==', ['get', 'sub_type'], 'Dump Point'], 'dump-point-icon',
-
-            'default-icon'
-          ],
-          'icon-size': 1,  
-          'icon-allow-overlap': false,  
-        },
-      });
-  
+        // Add unclustered points layer using emoji icons
+        if (!map.getLayer('unclustered-point')) {
+          map.addLayer({
+            id: 'unclustered-point',
+            type: 'symbol',
+            source: 'places',
+            filter: ['!', ['has', 'point_count']],
+            layout: {
+              'icon-image': [
+                'case',
+                ['==', ['get', 'type'], 'Fountain'], 'fountain-icon',
+                ['==', ['get', 'type'], 'Attraction'], 'attraction-icon',
+                ['==', ['get', 'sub_type'], 'Shower'], 'shower-icon',
+                ['==', ['get', 'sub_type'], 'Dump Point'], 'dump-point-icon',
+                'toilet-icon' // Default for toilets and other cases
+              ],
+              'icon-size': 0.8, // Smaller size to match Travel.tsx
+              'icon-allow-overlap': false,
+            },
+          });
+        }
       }
+      });
     };
     
     if (mapRef.current && data) {
-      addFountainsLayer(mapRef.current, data);
+      addFountainsLayer(mapRef.current, data).catch(error => {
+        console.error('Error in addFountainsLayer:', error);
+      });
     }
   }, [data, filterDogBowl, filterBottleTap, filterDP, filterShower, filterParking, filterAccessible, filterMale, filterFemale, filterAC, filterBC, selectedType]);
 

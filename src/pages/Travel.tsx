@@ -18,10 +18,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 import { createRoot } from 'react-dom/client';
-import showerIconPath from '../assets/shower.svg';
-import fountainIconPath from '../assets/fountain.svg';
-import attractionIconPath from '../assets/attraction.svg';
-import dumpPointIconPath from '../assets/dump.svg';
 import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -91,22 +87,27 @@ function Legend() {
       <h3 className="font-bold mb-2">Click points to get details</h3>
       
       <div className="flex items-center mb-1">
-        <img src={fountainIconPath} alt="Drinking Fountain" className="w-4 h-4 mr-2" />
+        <span className="text-lg mr-2">💧</span>
         <span>Drinking Fountain</span>
       </div>
       
       <div className="flex items-center mb-1">
-        <img src={dumpPointIconPath} alt="Dump Point" className="w-4 h-4 mr-2" />
+        <span className="text-lg mr-2">🗑️</span>
         <span>Dump Point</span>
       </div>
       
       <div className="flex items-center mb-1">
-        <img src={showerIconPath} alt="Shower" className="w-4 h-4 mr-2" />
+        <span className="text-lg mr-2">🚿</span>
         <span>Shower</span>
       </div>
-
+      
       <div className="flex items-center mb-1">
-        <img src={attractionIconPath} alt="Attraction" className="w-4 h-4 mr-2" />
+        <span className="text-lg mr-2">🚽</span>
+        <span>Toilet</span>
+      </div>
+      
+      <div className="flex items-center mb-1">
+        <span className="text-lg mr-2">🏞️</span>
         <span>Attraction</span>
       </div>
     </div>
@@ -528,7 +529,7 @@ export default function Travel() {
   }, [addWaypoint, waypoints]);
 
   useEffect(() => {
-    const addFountainsLayer = (map: mapboxgl.Map, data: GeoJSONData) => {
+    const addFountainsLayer = async (map: mapboxgl.Map, data: GeoJSONData) => {
       const filteredData = {
         ...data,
         features: data.features.filter(feature => {
@@ -567,119 +568,184 @@ export default function Travel() {
         })
       };
 
-        // load icon
-      const showerImg = new Image(20, 20);
-      showerImg.onload = () => {
-        map.addImage('shower-icon', showerImg);
-      };
-      showerImg.src = showerIconPath;
+      // Convert emoji to image and load into Mapbox
+      const emojiToImage = (emoji: string, name: string): Promise<void> => {
+        return new Promise((resolve, reject) => {
+          // Check if image already exists
+          if (map.hasImage(name)) {
+            resolve();
+            return;
+          }
 
-      const fountainImg = new Image(20, 20);
-      fountainImg.onload = () => {
-        map.addImage('fountain-icon', fountainImg);
-      };
-      fountainImg.src = fountainIconPath;
+          const canvas = document.createElement('canvas');
+          const size = 40; // Icon size
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          
+          if (!ctx) {
+            reject(new Error('Could not get canvas context'));
+            return;
+          }
 
-      const attractionImg = new Image(20, 20);
-      attractionImg.onload = () => {
-        map.addImage('attraction-icon', attractionImg);
-      };
-      attractionImg.src = attractionIconPath;
-
-      const dumpPointImg = new Image(20, 20);
-      dumpPointImg.onload = () => {
-        map.addImage('dump-point-icon', dumpPointImg);
-      };
-      dumpPointImg.src = dumpPointIconPath;
-
-  
-      // 检查是否有可显示的点
-      if (filteredData.features.length === 0) {
-        setIsNoDataDialogOpen(true);
-      } else {
-        setIsNoDataDialogOpen(false);
-      }
-  
-      if (map.getSource('places')) {
-        (map.getSource('places') as mapboxgl.GeoJSONSource).setData(filteredData);
-      } else {
-        map.addSource('places', {
-          type: 'geojson',
-          data: filteredData,
-          cluster: true,
-          clusterMaxZoom: 10, // 最大的聚类缩放
-          clusterRadius: 50,  // 聚类的半径
+          // Set font size for emoji
+          ctx.font = `${size * 0.8}px Arial`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          
+          // Draw emoji on canvas
+          ctx.fillText(emoji, size / 2, size / 2);
+          
+          // Convert canvas to image
+          canvas.toBlob((blob) => {
+            if (!blob) {
+              reject(new Error('Failed to create blob'));
+              return;
+            }
+            
+            const img = new Image();
+            img.onload = () => {
+              try {
+                map.addImage(name, img);
+                resolve();
+              } catch (error) {
+                console.warn(`Failed to add icon ${name}:`, error);
+                resolve(); // Continue even if one icon fails
+              }
+            };
+            img.onerror = () => {
+              console.error(`Failed to load icon ${name}`);
+              reject(new Error(`Failed to load icon ${name}`));
+            };
+            img.src = URL.createObjectURL(blob);
+          }, 'image/png');
         });
-  
-        map.addLayer({
-          id: 'clusters',
-          type: 'circle',
-          source: 'places',
-          filter: ['has', 'point_count'],
-          paint: {
-            'circle-color': [
-              'step',
-              ['get', 'point_count'],
-              '#f1f075',
-              10,
-              '#ed9e28',
-              50,
-              '#f28cb1',
-            ],
-            'circle-radius': [
-              'step',
-              ['get', 'point_count'],
-              20,
-              10,
-              30,
-              50,
-              40,
-            ],
-          },
-        });
-  
-        map.addLayer({
-          id: 'cluster-count',
-          type: 'symbol',
-          source: 'places',
-          filter: ['has', 'point_count'],
-          layout: {
-            'text-field': '{point_count_abbreviated}',
-            'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
-            'text-size': 12,
-          },
-        });
+      };
 
-      // icon
-      map.addLayer({
-        id: 'unclustered-point',
-        type: 'symbol',
-        source: 'places',
-        filter: ['!', ['has', 'point_count']],
-        layout: {
-          'icon-image': [
-            'case',
+      // Load all emoji icons
+      const loadEmojiIcons = async () => {
+        try {
+          await Promise.all([
+            emojiToImage('💧', 'fountain-icon'),
+            emojiToImage('🚿', 'shower-icon'),
+            emojiToImage('🗑️', 'dump-point-icon'),
+            emojiToImage('🏞️', 'attraction-icon'), // Changed to mountain/lake emoji
+            emojiToImage('🚽', 'toilet-icon'),
+          ]);
+          console.log('All emoji icons loaded successfully');
+        } catch (error) {
+          console.error('Error loading emoji icons:', error);
+        }
+      };
 
-            ['==', ['get', 'type'], 'Fountain'], 'fountain-icon',
+      // Load icons before adding layers
+      loadEmojiIcons().then(() => {
+        // 检查是否有可显示的点
+        if (filteredData.features.length === 0) {
+          setIsNoDataDialogOpen(true);
+        } else {
+          setIsNoDataDialogOpen(false);
+        }
+    
+        if (map.getSource('places')) {
+          (map.getSource('places') as mapboxgl.GeoJSONSource).setData(filteredData);
+          
+          // Ensure unclustered-point layer exists and uses emoji icons
+          if (!map.getLayer('unclustered-point')) {
+            map.addLayer({
+              id: 'unclustered-point',
+              type: 'symbol',
+              source: 'places',
+              filter: ['!', ['has', 'point_count']],
+              layout: {
+                'icon-image': [
+                  'case',
+                  ['==', ['get', 'type'], 'Fountain'], 'fountain-icon',
+                  ['==', ['get', 'type'], 'Attraction'], 'attraction-icon',
+                  ['==', ['get', 'sub_type'], 'Shower'], 'shower-icon',
+                  ['==', ['get', 'sub_type'], 'Dump Point'], 'dump-point-icon',
+                  'toilet-icon' // Default for toilets and other cases
+                ],
+                'icon-size': 0.8, // Smaller size
+                'icon-allow-overlap': false,
+              },
+            });
+          }
+        } else {
+          map.addSource('places', {
+            type: 'geojson',
+            data: filteredData,
+            cluster: true,
+            clusterMaxZoom: 10, // 最大的聚类缩放
+            clusterRadius: 50,  // 聚类的半径
+          });
+    
+          map.addLayer({
+            id: 'clusters',
+            type: 'circle',
+            source: 'places',
+            filter: ['has', 'point_count'],
+            paint: {
+              'circle-color': [
+                'step',
+                ['get', 'point_count'],
+                '#f1f075',
+                10,
+                '#ed9e28',
+                50,
+                '#f28cb1',
+              ],
+              'circle-radius': [
+                'step',
+                ['get', 'point_count'],
+                20,
+                10,
+                30,
+                50,
+                40,
+              ],
+            },
+          });
+    
+          map.addLayer({
+            id: 'cluster-count',
+            type: 'symbol',
+            source: 'places',
+            filter: ['has', 'point_count'],
+            layout: {
+              'text-field': '{point_count_abbreviated}',
+              'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+              'text-size': 12,
+            },
+          });
 
-            ['==', ['get', 'type'], 'Attraction'], 'attraction-icon',
-
-            ['==', ['get', 'sub_type'], 'Shower'], 'shower-icon',
-
-            ['==', ['get', 'sub_type'], 'Dump Point'], 'dump-point-icon',
-
-            'default-icon'
-          ],
-          'icon-size': 1,  
-          'icon-allow-overlap': false,  
-        },
+          // Add unclustered points layer using emoji icons
+          map.addLayer({
+            id: 'unclustered-point',
+            type: 'symbol',
+            source: 'places',
+            filter: ['!', ['has', 'point_count']],
+            layout: {
+              'icon-image': [
+                'case',
+                ['==', ['get', 'type'], 'Fountain'], 'fountain-icon',
+                ['==', ['get', 'type'], 'Attraction'], 'attraction-icon',
+                ['==', ['get', 'sub_type'], 'Shower'], 'shower-icon',
+                ['==', ['get', 'sub_type'], 'Dump Point'], 'dump-point-icon',
+                'toilet-icon' // Default for toilets and other cases
+              ],
+              'icon-size': 0.8, // Smaller size
+              'icon-allow-overlap': false,
+            },
+          });
+        }
       });
-      }
     };
   
     if (mapRef.current && data) {
-      console.log('here');
-      addFountainsLayer(mapRef.current, data);
+      addFountainsLayer(mapRef.current, data).catch(error => {
+        console.error('Error in addFountainsLayer:', error);
+      });
     }
   }, [data, filterDogBowl, filterBottleTap, filterDP, filterShower, filterParking, filterAccessible, filterMale, filterFemale, filterAC, filterBC, selectedType]);
   
@@ -988,17 +1054,13 @@ export default function Travel() {
                 {waypointInfo.map((waypoint, index) => (
                   <li key={index} className="flex justify-between items-center bg-gray-100 p-2 rounded">
                     <div className="flex items-center">
-                      <img 
-                        src={
-                          waypoint.type === 'Fountain' ? fountainIconPath :
-                          waypoint.type === 'Attraction' ? attractionIconPath :
-                          waypoint.sub_type === 'Shower' ? showerIconPath :
-                          waypoint.sub_type === 'Dump Point' ? dumpPointIconPath :
-                          fountainIconPath
-                        } 
-                        alt={waypoint.type} 
-                        className="w-6 h-6 mr-2" 
-                      />
+                      <span className="text-xl mr-2">
+                        {waypoint.type === 'Fountain' ? '💧' :
+                         waypoint.type === 'Attraction' ? '🏞️' :
+                         waypoint.sub_type === 'Shower' ? '🚿' :
+                         waypoint.sub_type === 'Dump Point' ? '🗑️' :
+                         '🚽'}
+                      </span>
                       <span>{waypoint.name}</span>
                     </div>
                     <Button
