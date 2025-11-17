@@ -273,14 +273,17 @@ ${attractionsInfo}`;
     const structuredPrompt = generateStructuredPrompt(formData);
     console.log('Structured prompt:', structuredPrompt);
 
+    const API_URL = import.meta.env.VITE_API_AI_URL;
+    const API_KEY = import.meta.env.VITE_API_KEY;
+
       try {
         // Single API call to get all responses at once
         // Lambda function expects queryStringParameters in the event
-        const response = await fetch('https://zrvasoqmt4.execute-api.us-east-1.amazonaws.com/dev/ai', {
+        const response = await fetch(API_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': 'TQj3QrDIGj7Oi36MkJHga6NRwwgVa9Vc9ar4oJpV'
+            'x-api-key': API_KEY
           },
           body: JSON.stringify({ 
             queryStringParameters: { 

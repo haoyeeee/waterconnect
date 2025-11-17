@@ -399,13 +399,16 @@ export default function Travel() {
       const nav = new mapboxgl.NavigationControl();
       mapRef.current.addControl(nav, 'top-right');
 
+      const API_URL = import.meta.env.VITE_API_MAP_URL;
+      const API_KEY = import.meta.env.VITE_API_KEY;
+
       mapRef.current.on('load', () => {
         setIsLoading(true);
-        fetch('https://zrvasoqmt4.execute-api.us-east-1.amazonaws.com/prod/query', {
+        fetch(API_URL, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': 'TQj3QrDIGj7Oi36MkJHga6NRwwgVa9Vc9ar4oJpV'
+            'x-api-key': API_KEY
           },
         })
           .then(response => response.json())
