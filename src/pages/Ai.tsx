@@ -274,7 +274,6 @@ ${attractionsInfo}`;
     console.log('Structured prompt:', structuredPrompt);
 
     const API_URL = import.meta.env.VITE_API_AI_URL;
-    const API_KEY = import.meta.env.VITE_API_KEY;
 
       try {
         // Single API call to get all responses at once
@@ -282,8 +281,7 @@ ${attractionsInfo}`;
         const response = await fetch(API_URL, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': API_KEY
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({ 
             queryStringParameters: { 

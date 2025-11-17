@@ -400,15 +400,13 @@ export default function Travel() {
       mapRef.current.addControl(nav, 'top-right');
 
       const API_URL = import.meta.env.VITE_API_MAP_URL;
-      const API_KEY = import.meta.env.VITE_API_KEY;
 
       mapRef.current.on('load', () => {
         setIsLoading(true);
         fetch(API_URL, {
           method: 'GET',
           headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': API_KEY
+            'Content-Type': 'application/json'
           },
         })
           .then(response => response.json())
