@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useToast } from '@/components/ui/use-toast';
 
 import { createRoot } from 'react-dom/client';
 import { ChevronDown, ChevronUp, X } from 'lucide-react';
@@ -120,9 +122,14 @@ export default function Travel() {
   const directionsRef = useRef<InstanceType<typeof MapboxDirections> | null>(null);
   
   const [data, setData] = useState<GeoJSONData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [filterDogBowl, setFilterDogBowl] = useState(false);
   const [filterBottleTap, setFilterBottleTap] = useState(false);
   const [isNoDataDialogOpen, setIsNoDataDialogOpen] = useState(false);
+  const [selectedFeature, setSelectedFeature] = useState<GeoJSONFeature | null>(null);
+  const [selectedCoordinates, setSelectedCoordinates] = useState<[number, number] | null>(null);
+  const [imageError, setImageError] = useState(false);
+  const { toast } = useToast();
 
   const [origin, setOrigin] = useState('Current Location');
   const originAutocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
@@ -153,6 +160,7 @@ export default function Travel() {
   const [directions, setDirections] = useState<any>(null);
 
   const [waypointInfo, setWaypointInfo] = useState<WaypointInfo[]>([]);
+  const isInitialLoadRef = useRef(true);
 
   const resetFilters = useCallback(() => {
     setFilterDogBowl(false);
@@ -175,6 +183,38 @@ export default function Travel() {
       resetFilters();
     }
   }, [selectedType, resetFilters]);
+
+  const handleFeatureClick = useCallback((feature: GeoJSONFeature, coordinates: [number, number]) => {
+    setSelectedFeature(feature);
+    setSelectedCoordinates(coordinates);
+    setImageError(false);
+    // Disable map interactions when card is open
+    if (mapRef.current) {
+      mapRef.current.boxZoom.disable();
+      mapRef.current.scrollZoom.disable();
+      mapRef.current.dragPan.disable();
+      mapRef.current.dragRotate.disable();
+      mapRef.current.keyboard.disable();
+      mapRef.current.doubleClickZoom.disable();
+      mapRef.current.touchZoomRotate.disable();
+    }
+  }, []);
+
+  const closeFeatureCard = useCallback(() => {
+    setSelectedFeature(null);
+    setSelectedCoordinates(null);
+    setImageError(false);
+    // Re-enable map interactions
+    if (mapRef.current) {
+      mapRef.current.boxZoom.enable();
+      mapRef.current.scrollZoom.enable();
+      mapRef.current.dragPan.enable();
+      mapRef.current.dragRotate.enable();
+      mapRef.current.keyboard.enable();
+      mapRef.current.doubleClickZoom.enable();
+      mapRef.current.touchZoomRotate.enable();
+    }
+  }, []);
 
   // const initializeAutocomplete = useCallback(() => {
   //   if (window.google && window.google.maps && window.google.maps.places) {
@@ -360,6 +400,7 @@ export default function Travel() {
       mapRef.current.addControl(nav, 'top-right');
 
       mapRef.current.on('load', () => {
+        setIsLoading(true);
         fetch('https://zrvasoqmt4.execute-api.us-east-1.amazonaws.com/prod/query', {
           method: 'GET',
           headers: {
@@ -373,6 +414,11 @@ export default function Travel() {
 
             console.log('GeoJSON Data:', parsedGeojson); // Check data structure
             setData(parsedGeojson);
+            setIsLoading(false);
+          })
+          .catch((error) => {
+            console.error('Error fetching data:', error);
+            setIsLoading(false);
           });
       });
 
@@ -412,11 +458,7 @@ export default function Travel() {
         const feature = e.features && e.features[0];
         if (feature && feature.geometry.type === 'Point') {
           const coordinates = feature.geometry.coordinates.slice() as [number, number];
-
-          new mapboxgl.Popup()
-            .setLngLat(coordinates)
-            .setDOMContent(createPopupContent(feature as unknown as GeoJSONFeature, coordinates)) // 使用 setDOMContent 方法添加 DOM 节点
-            .addTo(mapRef.current!);
+          handleFeatureClick(feature as unknown as GeoJSONFeature, coordinates);
         }
       });
 
@@ -430,90 +472,6 @@ export default function Travel() {
 
       mapRef.current.addControl(legendControl, 'top-left');
 
-      const truncateText = (text: string, maxLength: number) => {
-        if (text.length > maxLength) {
-          return text.substring(0, maxLength) + '...';
-        }
-        return text;
-      };
-
-      const createPopupContent = (feature: GeoJSONFeature, coordinates: [number, number]): HTMLElement => {
-        const { properties } = feature;
-        const container = document.createElement('div');
-      
-        const title = document.createElement('h3');
-        title.style.fontWeight = 'bold';
-        title.style.fontSize = '14px';
-        title.style.paddingBottom = '2px';
-        title.innerText = truncateText(properties.name || 'Drinking Fountain', 50);  // 限制标题为50字符
-        container.appendChild(title);
-      
-        if (properties.type === 'Fountain') {
-          const dogBowl = document.createElement('p');
-          dogBowl.innerText = `Dog Bowl: ${properties.dog_bowl ? 'Yes' : 'No'}`;
-          container.appendChild(dogBowl);
-      
-          const bottleTap = document.createElement('p');
-          bottleTap.innerText = `Bottle Refill Tap: ${properties.bottle_refill_tap ? 'Yes' : 'No'}`;
-          container.appendChild(bottleTap);
-        } else if (properties.type === 'Attraction') {
-          const intro = document.createElement('p');
-          intro.innerText = truncateText(properties.introduction || 'No introduction available', 400); // 限制介绍为100字符
-          container.appendChild(intro);
-      
-          const image = document.createElement('img');
-          image.src = properties.picture || '';
-          image.alt = properties.name || 'Image';
-          image.style.width = '100%';
-          image.style.height = 'auto';
-          container.appendChild(image);
-        } else {
-          const address = document.createElement('p');
-          address.innerText = `Address: ${truncateText(properties.address || 'No address available', 80)}`;
-          container.appendChild(address);
-      
-          const hours = document.createElement('p');
-          hours.innerText = properties.opening_hours || 'No opening hours available';
-          container.appendChild(hours);
-      
-          const shower = document.createElement('p');
-          shower.innerText = `Shower: ${properties.shower ? 'Yes' : 'No'}`;
-          container.appendChild(shower);
-      
-          const dumpPoint = document.createElement('p');
-          dumpPoint.innerText = `Dump Point: ${properties.dump_point ? 'Yes' : 'No'}`;
-          container.appendChild(dumpPoint);
-        }
-  
-        // 途经点按钮逻辑
-        const isWaypoint = waypoints.some(wp => wp[0] === coordinates[0] && wp[1] === coordinates[1]);
-        const button = document.createElement('button');
-        button.innerText = isWaypoint ? 'Delete' : 'Add';
-        button.style.backgroundColor = isWaypoint ? '#ef4444' : '#3b82f6';
-        button.style.color = 'white';
-        button.style.padding = '8px 16px';
-        button.style.border = 'none';
-        button.style.borderRadius = '4px';
-        button.style.marginTop = '10px';
-        button.style.cursor = 'pointer';
-  
-        button.onclick = () => {
-          if (isWaypoint) {
-            const index = waypoints.findIndex(wp => wp[0] === coordinates[0] && wp[1] === coordinates[1]);
-            if (index !== -1) {
-              removeWaypoint(index);
-            }
-          } else {
-            addWaypoint(coordinates[1], coordinates[0], feature);
-          }
-        };
-  
-        container.appendChild(button);
-  
-        return container;
-      };
-      
-      
     }
 
     // if (mapRef.current) {
@@ -526,7 +484,7 @@ export default function Travel() {
     //   // Initialize new directions control with updated transport mode
     //   initializeDirections();
     // }
-  }, [addWaypoint, waypoints]);
+  }, [addWaypoint, waypoints, removeWaypoint, handleFeatureClick]);
 
   useEffect(() => {
     const addFountainsLayer = async (map: mapboxgl.Map, data: GeoJSONData) => {
@@ -641,6 +599,19 @@ export default function Travel() {
       // Load icons before adding layers
       loadEmojiIcons().then(() => {
         // 检查是否有可显示的点
+        // Show toast with filtered count (only when user applies filters, not on initial load)
+        if (!isInitialLoadRef.current && filteredData.features.length > 0) {
+          toast({
+            title: "Filter Applied",
+            description: `Found ${filteredData.features.length} location${filteredData.features.length > 1 ? 's' : ''}`,
+          });
+        }
+
+        // Mark that initial load is complete
+        if (isInitialLoadRef.current) {
+          isInitialLoadRef.current = false;
+        }
+
         if (filteredData.features.length === 0) {
           setIsNoDataDialogOpen(true);
         } else {
@@ -747,7 +718,7 @@ export default function Travel() {
         console.error('Error in addFountainsLayer:', error);
       });
     }
-  }, [data, filterDogBowl, filterBottleTap, filterDP, filterShower, filterParking, filterAccessible, filterMale, filterFemale, filterAC, filterBC, selectedType]);
+  }, [data, filterDogBowl, filterBottleTap, filterDP, filterShower, filterParking, filterAccessible, filterMale, filterFemale, filterAC, filterBC, selectedType, toast]);
   
   const handleSearch = () => {
     // initializeDirections(transportMode);
@@ -1089,21 +1060,144 @@ export default function Travel() {
       </div>
 
       {/* Right Panel (Map) */}
-      <div className="w-full md:w-2/3 h-full">
+      <div className="w-full md:w-2/3 h-full relative">
         <div ref={mapContainerRef} className="w-full h-full"></div>
+        {/* Loading Overlay - only covers map area */}
+        {isLoading && (
+          <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-8 flex flex-col items-center">
+              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mb-4"></div>
+              <p className="text-lg font-semibold">Loading map data...</p>
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* Feature Detail Card Modal */}
+      {selectedFeature && selectedCoordinates && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={closeFeatureCard}
+        >
+          <Card 
+            className="w-full max-w-md mx-4 max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-xl">
+                {selectedFeature.properties.name || 'Drinking Fountain'}
+              </CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={closeFeatureCard}
+                className="h-8 w-8 p-0"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {selectedFeature.properties.type === 'Fountain' ? (
+                <div className="space-y-2">
+                  <p><strong>Dog Bowl:</strong> {selectedFeature.properties.dog_bowl ? 'Yes' : 'No'}</p>
+                  <p><strong>Bottle Refill Tap:</strong> {selectedFeature.properties.bottle_refill_tap ? 'Yes' : 'No'}</p>
+                </div>
+              ) : selectedFeature.properties.type === 'Attraction' ? (
+                <div className="space-y-2">
+                  {selectedFeature.properties.introduction && (
+                    <p>{selectedFeature.properties.introduction}</p>
+                  )}
+                  {selectedFeature.properties.picture && !imageError ? (
+                    <img 
+                      src={selectedFeature.properties.picture} 
+                      alt={selectedFeature.properties.name || 'Attraction'}
+                      className="w-full h-auto rounded"
+                      onError={() => setImageError(true)}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full h-48 bg-gray-200 flex items-center justify-center rounded">
+                      <div className="text-center text-gray-500">
+                        <svg className="w-16 h-16 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <p className="text-sm">No image available</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {selectedFeature.properties.address && (
+                    <p><strong>Address:</strong> {selectedFeature.properties.address}, {selectedFeature.properties.town}</p>
+                  )}
+                  {selectedFeature.properties.opening_hours && (
+                    <p><strong>Opening Hours:</strong> {selectedFeature.properties.opening_hours}</p>
+                  )}
+                  <p><strong>Shower:</strong> {selectedFeature.properties.shower ? 'Yes' : 'No'}</p>
+                  <p><strong>Dump Point:</strong> {selectedFeature.properties.dump_point ? 'Yes' : 'No'}</p>
+                </div>
+              )}
+              <div className="flex gap-2 mt-4">
+                <Button
+                  onClick={() => {
+                    const [lng, lat] = selectedCoordinates;
+                    const isWaypoint = waypoints.some(wp => wp[0] === lng && wp[1] === lat);
+                    if (isWaypoint) {
+                      const index = waypoints.findIndex(wp => wp[0] === lng && wp[1] === lat);
+                      if (index !== -1) {
+                        removeWaypoint(index);
+                      }
+                    } else {
+                      addWaypoint(lat, lng, selectedFeature);
+                    }
+                    closeFeatureCard();
+                  }}
+                  className="flex-1"
+                  variant={waypoints.some(wp => wp[0] === selectedCoordinates[0] && wp[1] === selectedCoordinates[1]) ? "destructive" : "default"}
+                >
+                  {waypoints.some(wp => wp[0] === selectedCoordinates[0] && wp[1] === selectedCoordinates[1]) ? 'Remove from Route' : 'Add to Route'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Alert Dialog */}
-      <AlertDialog open={isNoDataDialogOpen} onOpenChange={setIsNoDataDialogOpen}>
+      <AlertDialog open={isNoDataDialogOpen} onOpenChange={(open) => {
+        setIsNoDataDialogOpen(open);
+        if (!open) {
+          // Reset filters and map when dialog is closed
+          resetFilters();
+          setSelectedType(null);
+          if (mapRef.current) {
+            mapRef.current.flyTo({
+              center: [144.9631, -37.8136],
+              zoom: 6
+            });
+          }
+        }
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>No Data Available</AlertDialogTitle>
             <AlertDialogDescription>
-              The filter you applied returned no results. Please try adjusting your filters.
+              The filter you applied returned no results. Filters have been reset.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setIsNoDataDialogOpen(false)}>OK</AlertDialogAction>
+            <AlertDialogAction onClick={() => {
+              setIsNoDataDialogOpen(false);
+              resetFilters();
+              setSelectedType(null);
+              if (mapRef.current) {
+                mapRef.current.flyTo({
+                  center: [144.9631, -37.8136],
+                  zoom: 6
+                });
+              }
+            }}>OK</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

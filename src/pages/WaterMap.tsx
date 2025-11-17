@@ -18,7 +18,9 @@ import ReactDOM from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { circle } from '@turf/turf';
-import { ChevronDown, ChevronUp, Circle } from 'lucide-react';
+import { ChevronDown, ChevronUp, Circle, X } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useToast } from '@/components/ui/use-toast';
 
 interface GeoJSONFeature {
   type: 'Feature';
@@ -28,6 +30,9 @@ interface GeoJSONFeature {
   };
   properties: {
     type: string;
+    // properties of Attraction
+    picture?: string;
+    introduction?: string;
     // properties of Fountain
     dog_bowl?: boolean;
     bottle_refill_tap?: boolean;
@@ -109,9 +114,14 @@ export default function WaterMap() {
   const directionsRef = useRef<InstanceType<typeof MapboxDirections> | null>(null);
   
   const [data, setData] = useState<GeoJSONData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [filterDogBowl, setFilterDogBowl] = useState(false);
   const [filterBottleTap, setFilterBottleTap] = useState(false);
   const [isNoDataDialogOpen, setIsNoDataDialogOpen] = useState(false);
+  const [selectedFeature, setSelectedFeature] = useState<GeoJSONFeature | null>(null);
+  const [selectedCoordinates, setSelectedCoordinates] = useState<[number, number] | null>(null);
+  const [imageError, setImageError] = useState(false);
+  const { toast } = useToast();
 
   const [origin, setOrigin] = useState('Current Location');
   const originAutocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
@@ -130,6 +140,7 @@ export default function WaterMap() {
   const [filterBC, setFilterBC] = useState(false);
   const [isFilterExpanded, setIsFilterExpanded] = useState(true);
   const [selectedType, setSelectedType] = useState<'fountain' | 'toilet' | null>(null);
+  const isInitialLoadRef = useRef(true);
 
   // Reset filters when changing type
   const resetFilters = useCallback(() => {
@@ -154,30 +165,37 @@ export default function WaterMap() {
     }
   }, [selectedType, resetFilters]);
 
-  function createPopupContent(feature: GeoJSONFeature, coordinates: [number, number]): string {
-    const { properties } = feature;
-    let descriptionHtml = `<h3 style="font-weight: bold;">${properties.name || 'Drinking Fountain'}</h3>`;
-    
-    if (properties.type === 'Fountain') {
-      descriptionHtml += `
-        <p>Dog Bowl: ${properties.dog_bowl ? 'Yes' : 'No'}</p>
-        <p>Bottle Refill Tap: ${properties.bottle_refill_tap ? 'Yes' : 'No'}</p>
-      `;
-    } else {
-      descriptionHtml += `
-        <p>Address: ${properties.address}, ${properties.town}</p>
-        <p>${properties.opening_hours}</p>
-        <p>Shower: ${properties.shower ? 'Yes' : 'No'}</p>
-        <p>Dump Point: ${properties.dump_point ? 'Yes' : 'No'}</p>
-      `;
+  const handleFeatureClick = useCallback((feature: GeoJSONFeature, coordinates: [number, number]) => {
+    setSelectedFeature(feature);
+    setSelectedCoordinates(coordinates);
+    setImageError(false);
+    // Disable map interactions when card is open
+    if (mapRef.current) {
+      mapRef.current.boxZoom.disable();
+      mapRef.current.scrollZoom.disable();
+      mapRef.current.dragPan.disable();
+      mapRef.current.dragRotate.disable();
+      mapRef.current.keyboard.disable();
+      mapRef.current.doubleClickZoom.disable();
+      mapRef.current.touchZoomRotate.disable();
     }
-    
-    descriptionHtml += `
-      <button onclick="getDirections(${coordinates[1]}, ${coordinates[0]})" style="background-color: #3b82f6; color: white; padding: 8px 16px; border: none; border-radius: 4px; margin-top: 10px; cursor: pointer;">Get Directions</button>
-    `;
-    
-    return descriptionHtml;
-  }
+  }, []);
+
+  const closeFeatureCard = useCallback(() => {
+    setSelectedFeature(null);
+    setSelectedCoordinates(null);
+    setImageError(false);
+    // Re-enable map interactions
+    if (mapRef.current) {
+      mapRef.current.boxZoom.enable();
+      mapRef.current.scrollZoom.enable();
+      mapRef.current.dragPan.enable();
+      mapRef.current.dragRotate.enable();
+      mapRef.current.keyboard.enable();
+      mapRef.current.doubleClickZoom.enable();
+      mapRef.current.touchZoomRotate.enable();
+    }
+  }, []);
 
   const updateStartPoint = useCallback((lng: number, lat: number) => {
     if (mapRef.current) {
@@ -301,6 +319,7 @@ export default function WaterMap() {
       mapRef.current.addControl(nav, 'top-right');
 
       mapRef.current.on('load', () => {
+        setIsLoading(true);
         fetch('https://zrvasoqmt4.execute-api.us-east-1.amazonaws.com/prod/query', {
           method: 'GET',
           headers: {
@@ -314,24 +333,14 @@ export default function WaterMap() {
 
             console.log('GeoJSON Data:', parsedGeojson); // Check data structure
             setData(parsedGeojson);
+            setIsLoading(false);
+          })
+          .catch((error) => {
+            console.error('Error fetching data:', error);
+            setIsLoading(false);
           });
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).getDirections = (lat: number, lng: number) => {
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition((position) => {
-            const { latitude, longitude } = position.coords;
-            updateStartPoint(longitude, latitude);
-            const url = `https://www.google.com/maps/dir/?api=1&origin=${latitude},${longitude}&destination=${lat},${lng}&travelmode=driving`;
-            window.open(url, '_blank');
-          }, () => {
-            alert('Unable to get your current location. Please check your browser settings.');
-          });
-        } else {
-          alert('Geolocation is not supported by your browser.');
-        }
-      };
 
       mapRef.current!.on('click', 'clusters', (e) => {
         const features = mapRef.current?.queryRenderedFeatures(e.point, { layers: ['clusters'] }) ?? [];
@@ -364,11 +373,7 @@ export default function WaterMap() {
         const feature = e.features && e.features[0];
         if (feature && feature.geometry.type === 'Point') {
           const coordinates = feature.geometry.coordinates.slice() as [number, number];
-
-          new mapboxgl.Popup()
-            .setLngLat(coordinates)
-            .setHTML(createPopupContent(feature as unknown as GeoJSONFeature, coordinates))
-            .addTo(mapRef.current!);
+          handleFeatureClick(feature as unknown as GeoJSONFeature, coordinates);
         }
       });
 
@@ -380,7 +385,7 @@ export default function WaterMap() {
       };
       mapRef.current.addControl(legendControl, 'top-left');
     }
-  }, [updateStartPoint]);
+  }, [updateStartPoint, handleFeatureClick]);
 
   useEffect(() => {
     const addFountainsLayer = async (map: mapboxgl.Map, data: GeoJSONData) => {
@@ -437,6 +442,19 @@ export default function WaterMap() {
       
       console.log(`Filtered data: ${filteredData.features.length} features out of ${data.features.length} total`);
       console.log('Type distribution:', typeCounts);
+
+      // Show toast with filtered count (only when user applies filters, not on initial load)
+      if (!isInitialLoadRef.current && filteredData.features.length > 0) {
+        toast({
+          title: "Filter Applied",
+          description: `Found ${filteredData.features.length} location${filteredData.features.length > 1 ? 's' : ''}`,
+        });
+      }
+
+      // Mark that initial load is complete
+      if (isInitialLoadRef.current) {
+        isInitialLoadRef.current = false;
+      }
 
       if (filteredData.features.length === 0) {
         setIsNoDataDialogOpen(true);
@@ -628,7 +646,7 @@ export default function WaterMap() {
         console.error('Error in addFountainsLayer:', error);
       });
     }
-  }, [data, filterDogBowl, filterBottleTap, filterDP, filterShower, filterParking, filterAccessible, filterMale, filterFemale, filterAC, filterBC, selectedType]);
+  }, [data, filterDogBowl, filterBottleTap, filterDP, filterShower, filterParking, filterAccessible, filterMale, filterFemale, filterAC, filterBC, selectedType, toast]);
 
   
 
@@ -798,20 +816,142 @@ export default function WaterMap() {
         {/* Map */}
         <div className="flex-grow relative bg-gray-100 rounded-lg shadow-md m-2 md:m-4 overflow-hidden" style={{ height: 'calc(100vh - 200px)' }}>
           <div ref={mapContainerRef} className="absolute inset-0 bg-gray-100"></div>
+          {/* Loading Overlay - only covers map area */}
+          {isLoading && (
+            <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-8 flex flex-col items-center">
+                <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mb-4"></div>
+                <p className="text-lg font-semibold">Loading map data...</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
+      {/* Feature Detail Card Modal */}
+      {selectedFeature && selectedCoordinates && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={closeFeatureCard}
+        >
+          <Card 
+            className="w-full max-w-md mx-4 max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-xl">
+                {selectedFeature.properties.name || 'Drinking Fountain'}
+              </CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={closeFeatureCard}
+                className="h-8 w-8 p-0"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {selectedFeature.properties.type === 'Fountain' ? (
+                <div className="space-y-2">
+                  <p><strong>Dog Bowl:</strong> {selectedFeature.properties.dog_bowl ? 'Yes' : 'No'}</p>
+                  <p><strong>Bottle Refill Tap:</strong> {selectedFeature.properties.bottle_refill_tap ? 'Yes' : 'No'}</p>
+                </div>
+              ) : selectedFeature.properties.type === 'Attraction' ? (
+                <div className="space-y-2">
+                  {selectedFeature.properties.introduction && (
+                    <p>{selectedFeature.properties.introduction}</p>
+                  )}
+                  {selectedFeature.properties.picture && !imageError ? (
+                    <img 
+                      src={selectedFeature.properties.picture} 
+                      alt={selectedFeature.properties.name || 'Attraction'}
+                      className="w-full h-auto rounded"
+                      onError={() => setImageError(true)}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full h-48 bg-gray-200 flex items-center justify-center rounded">
+                      <div className="text-center text-gray-500">
+                        <svg className="w-16 h-16 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <p className="text-sm">No image available</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {selectedFeature.properties.address && (
+                    <p><strong>Address:</strong> {selectedFeature.properties.address}, {selectedFeature.properties.town}</p>
+                  )}
+                  {selectedFeature.properties.opening_hours && (
+                    <p><strong>Opening Hours:</strong> {selectedFeature.properties.opening_hours}</p>
+                  )}
+                  <p><strong>Shower:</strong> {selectedFeature.properties.shower ? 'Yes' : 'No'}</p>
+                  <p><strong>Dump Point:</strong> {selectedFeature.properties.dump_point ? 'Yes' : 'No'}</p>
+                </div>
+              )}
+              <Button
+                onClick={() => {
+                  const [lng, lat] = selectedCoordinates;
+                  if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition((position) => {
+                      const { latitude, longitude } = position.coords;
+                      updateStartPoint(longitude, latitude);
+                      const url = `https://www.google.com/maps/dir/?api=1&origin=${latitude},${longitude}&destination=${lat},${lng}&travelmode=driving`;
+                      window.open(url, '_blank');
+                    }, () => {
+                      alert('Unable to get your current location. Please check your browser settings.');
+                    });
+                  } else {
+                    alert('Geolocation is not supported by your browser.');
+                  }
+                }}
+                className="w-full mt-4 bg-blue-500"
+              >
+                Get Directions
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Alert Dialog */}
-      <AlertDialog open={isNoDataDialogOpen} onOpenChange={setIsNoDataDialogOpen}>
+      <AlertDialog open={isNoDataDialogOpen} onOpenChange={(open) => {
+        setIsNoDataDialogOpen(open);
+        if (!open) {
+          // Reset filters and map when dialog is closed
+          resetFilters();
+          setSelectedType(null);
+          if (mapRef.current) {
+            mapRef.current.flyTo({
+              center: [144.9631, -37.8136],
+              zoom: 6
+            });
+          }
+        }
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>No Data Available</AlertDialogTitle>
             <AlertDialogDescription>
-              The filter you applied returned no results. Please try adjusting your filters.
+              The filter you applied returned no results. Filters have been reset.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setIsNoDataDialogOpen(false)}>OK</AlertDialogAction>
+            <AlertDialogAction onClick={() => {
+              setIsNoDataDialogOpen(false);
+              resetFilters();
+              setSelectedType(null);
+              if (mapRef.current) {
+                mapRef.current.flyTo({
+                  center: [144.9631, -37.8136],
+                  zoom: 6
+                });
+              }
+            }}>OK</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -8,6 +8,7 @@ import CaravanQuestionnaire from './pages/Ai';
 import Travel from './pages/Travel';
 import Notfound from './pages/Notfound';
 import Footer from './components/Footer';
+import { Toaster } from './components/ui/toaster';
 
 // import { useState } from 'react';
 
@@ -61,6 +62,7 @@ function App() {
           <Route path="*" element={<Notfound />} />
         </Routes>
         <Footer />
+        <Toaster />
       </Router>
     </>
   );
